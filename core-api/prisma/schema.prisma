@@ -1,0 +1,253 @@
+// core-api owns: user, otp, city, drive, slot, booking, waitlist, urgentRequest, donation, alert
+// Transcribed field-for-field from ../../../docs/data-model.md — do not hand-edit field names
+// without updating that file first.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  default
+  admin
+}
+
+enum UserStatus {
+  invited
+  active
+  blocked
+}
+
+enum OtpPurpose {
+  register
+  reset_password
+  staff_invite
+}
+
+enum BookingStatus {
+  confirmed
+  cancelled
+}
+
+enum RequestStatus {
+  open
+  completed
+  closed
+}
+
+enum UrgencyLevel {
+  normal
+  urgent
+  critical
+}
+
+enum AlertType {
+  booking_cancelled
+  waitlist_opening
+}
+
+// data-model.md §3 — fixed slug id (e.g. "colombo"), NOT cuid(). Seed script upserts by slug.
+model City {
+  id   String @id
+  name String
+  lat  Float
+  lng  Float
+
+  homeUsers      User[]          @relation("HomeCity")
+  workUsers      User[]          @relation("WorkCity")
+  drives         Drive[]
+  urgentRequests UrgentRequest[]
+
+  @@index([lat, lng])
+}
+
+model User {
+  id           String  @id @default(cuid())
+  email        String  @unique
+  passwordHash String?
+
+  avatarUrl String?
+  fullName  String?
+  phone     String? // ENCRYPTED at rest — data-model.md §5
+  bloodType String? // ENCRYPTED at rest — data-model.md §2.1/§5, validated as BloodType union at Zod layer
+
+  homeCityId String?
+  homeCity   City?   @relation("HomeCity", fields: [homeCityId], references: [id])
+  workCityId String?
+  workCity   City?   @relation("WorkCity", fields: [workCityId], references: [id])
+
+  role            UserRole @default(default)
+  isOrganizer     Boolean  @default(false)
+  isHospitalStaff Boolean  @default(false)
+
+  hospitalName  String?
+  hospitalRegId String?
+  position      String?
+
+  status UserStatus @default(active)
+
+  lastDonatedDate         DateTime? @db.Date
+  visibleToUrgentRequests Boolean   @default(false)
+
+  qrIdentifier String @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  bookings           Booking[]
+  waitlistEntries    Waitlist[]
+  drivesCreated      Drive[]         @relation("DriveOrganizer")
+  urgentRequests     UrgentRequest[]
+  donations          Donation[]      @relation("DonationRecipient")
+  donationsConfirmed Donation[]      @relation("DonationConfirmer")
+  alerts             Alert[]
+
+  @@index([homeCityId])
+  @@index([workCityId])
+}
+
+model Otp {
+  id        String     @id @default(cuid())
+  email     String
+  code      String
+  purpose   OtpPurpose
+  expiresAt DateTime
+  used      Boolean    @default(false)
+  createdAt DateTime   @default(now())
+
+  @@index([email, purpose])
+}
+
+model Drive {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  venue       String
+  cityId      String
+  city        City     @relation(fields: [cityId], references: [id])
+  lat         Float // denormalized from city at creation time
+  lng         Float
+  posterUrl   String?
+  date        DateTime @db.Date
+
+  createdBy String
+  organizer User   @relation("DriveOrganizer", fields: [createdBy], references: [id])
+
+  slots     Slot[]
+  bookings  Booking[]
+  waitlist  Waitlist[]
+  donations Donation[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  // Soft-delete only — see data-model.md §9 gap D6. A hard DELETE would violate
+  // FK integrity: Booking/Donation reference Drive without onDelete: Cascade
+  // (deliberately, so booking/donation history and badges survive an organizer
+  // deleting a drive). All read paths filter deletedAt: null.
+  deletedAt DateTime?
+
+  @@index([lat, lng])
+  @@index([date])
+}
+
+model Slot {
+  id          String @id @default(cuid())
+  driveId     String
+  drive       Drive  @relation(fields: [driveId], references: [id], onDelete: Cascade)
+  startTime   String // "09:00".."15:00", hourly, within 09:00-16:00
+  capacity    Int
+  bookedCount Int    @default(0)
+
+  bookings Booking[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([driveId, startTime])
+}
+
+model Booking {
+  id      String @id @default(cuid())
+  userId  String
+  user    User   @relation(fields: [userId], references: [id])
+  slotId  String
+  slot    Slot   @relation(fields: [slotId], references: [id])
+  driveId String // denormalized off slot
+  drive   Drive  @relation(fields: [driveId], references: [id])
+
+  eligibilityResult Json // { passed: true, answers: Record<string,string> }
+  status            BookingStatus @default(confirmed)
+
+  createdAt   DateTime  @default(now())
+  cancelledAt DateTime?
+
+  donation Donation?
+
+  @@index([userId, status])
+}
+
+model Waitlist {
+  id        String   @id @default(cuid())
+  driveId   String // per-drive, not per-slot
+  drive     Drive    @relation(fields: [driveId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  position  Int // 1-based, max 10 — enforced in service layer inside a transaction
+  createdAt DateTime @default(now())
+
+  @@unique([driveId, userId])
+}
+
+model UrgentRequest {
+  id             String        @id @default(cuid())
+  postedBy       String
+  poster         User          @relation(fields: [postedBy], references: [id])
+  bloodType      String // plain — see data-model.md §5
+  urgencyLevel   UrgencyLevel
+  hospitalName   String
+  hospitalCityId String
+  hospitalCity   City          @relation(fields: [hospitalCityId], references: [id])
+  contactPhone   String // plain, intentionally public
+  status         RequestStatus @default(open)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([hospitalCityId, bloodType, status])
+}
+
+model Donation {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation("DonationRecipient", fields: [userId], references: [id])
+  driveId     String
+  drive       Drive    @relation(fields: [driveId], references: [id])
+  bookingId   String   @unique // one donation per booking
+  booking     Booking  @relation(fields: [bookingId], references: [id])
+  confirmedBy String
+  confirmer   User     @relation("DonationConfirmer", fields: [confirmedBy], references: [id])
+  confirmedAt DateTime @default(now())
+
+  // Denormalized badge-display snapshot
+  driveTitle String
+  date       DateTime @db.Date
+  badgeCount Int
+}
+
+model Alert {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  type      AlertType
+  driveId   String?
+  requestId String? // currently unused this build — data-model.md §9 D3
+  message   String
+  read      Boolean   @default(false)
+  createdAt DateTime  @default(now())
+
+  @@index([userId, read])
+}

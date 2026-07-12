@@ -1,0 +1,39 @@
+// chat-api owns: chatbotMessage only — this is the ONLY model in this file.
+// Transcribed from ../../../docs/data-model.md §4.10.
+//
+// Uses Prisma's multiSchema feature to put this table in its own Postgres
+// schema ("chat"), separate from core-api's "public" schema, even though both
+// services share one physical Neon database (decisions-log.md B1). Without
+// this, `prisma migrate`/`db push` treats the entire database as its domain
+// and wants to drop every table it doesn't recognize — discovered the hard
+// way during 2.12 verification (both `migrate dev` and `db push` tried to
+// drop all of core-api's tables). Genuine schema-namespace separation is what
+// B1's "logically separated, physically co-located" actually requires.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["chat"]
+}
+
+enum ChatSender {
+  user
+  bot
+
+  @@schema("chat")
+}
+
+model ChatbotMessage {
+  id            String     @id @default(cuid())
+  userId        String // plain string, no Prisma relation — data-model.md §1
+  sender        ChatSender
+  messageText   String
+  matchedIntent String? // null for sender="user", or on Dialogflow fallback
+  createdAt     DateTime   @default(now())
+
+  @@index([userId, createdAt])
+  @@schema("chat")
+}

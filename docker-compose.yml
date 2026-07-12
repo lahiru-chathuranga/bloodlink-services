@@ -1,0 +1,21 @@
+# Local dev only — Render never reads this file (decisions-log.md H1).
+# Both services still point at the cloud Neon database (decisions-log.md B4);
+# there is no local Postgres container.
+services:
+  core-api:
+    build: ./core-api
+    ports:
+      - "4000:4000"
+    env_file:
+      - ./core-api/.env
+    environment:
+      - PORT=4000
+
+  chat-api:
+    build: ./chat-api
+    ports:
+      - "4001:4001"
+    env_file:
+      - ./chat-api/.env
+    environment:
+      - PORT=4001
