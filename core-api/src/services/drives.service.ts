@@ -51,6 +51,14 @@ export interface DriveSummaryDto {
   status: DriveStatus;
   slots: SlotDto[];
   myBookingStatus: MyBookingStatus;
+  isFullyBooked: boolean;
+}
+
+// data-model.md §2.2.1 — every slot full AND waitlist at max. Deliberately
+// separate from DriveStatus (see that section's note on why) — never lets a
+// full-but-registering drive become non-editable.
+export function computeIsFullyBooked(slots: Slot[], waitlistCount: number): boolean {
+  return slots.every((s) => s.bookedCount >= s.capacity) && waitlistCount >= WAITLIST_MAX;
 }
 
 export interface DriveDetailDto extends DriveSummaryDto {
@@ -87,6 +95,7 @@ export function toDriveSummary(
   drive: Drive,
   slots: Slot[],
   myBookingStatus: MyBookingStatus,
+  waitlistCount: number,
 ): DriveSummaryDto {
   return {
     id: drive.id,
@@ -98,22 +107,33 @@ export function toDriveSummary(
     status: toDriveStatus(drive.date),
     slots: slots.map(toSlotDto),
     myBookingStatus,
+    isFullyBooked: computeIsFullyBooked(slots, waitlistCount),
   };
+}
+
+export interface DriveWithDistance extends Drive {
+  distanceKm: number;
 }
 
 // Haversine SQL, per docs/cities.md's reference implementation — filters at the
 // DB layer using the indexed (lat, lng) columns rather than pulling every row
-// into application memory.
-export async function findDrivesNearPoint(lat: number, lng: number): Promise<Drive[]> {
-  return prisma.$queryRaw<Drive[]>`
-    SELECT * FROM "Drive"
+// into application memory. Returns distanceKm too — Requirements §5/decision #29
+// sorts the home feed's drives nearest-first, not by date.
+export async function findDrivesNearPoint(lat: number, lng: number): Promise<DriveWithDistance[]> {
+  return prisma.$queryRaw<DriveWithDistance[]>`
+    SELECT *, (6371 * acos(
+      cos(radians(${lat})) * cos(radians(lat)) *
+      cos(radians(lng) - radians(${lng})) +
+      sin(radians(${lat})) * sin(radians(lat))
+    )) AS "distanceKm"
+    FROM "Drive"
     WHERE "deletedAt" IS NULL
       AND (6371 * acos(
       cos(radians(${lat})) * cos(radians(lat)) *
       cos(radians(lng) - radians(${lng})) +
       sin(radians(${lat})) * sin(radians(lat))
     )) <= ${MATCH_RADIUS_KM}
-    ORDER BY date ASC
+    ORDER BY "distanceKm" ASC
   `;
 }
 
@@ -121,9 +141,10 @@ export async function getDriveDetail(driveId: string, userId: string): Promise<D
   const drive = await prisma.drive.findFirst({ where: { id: driveId, deletedAt: null }, include: { organizer: true } });
   if (!drive) throw new NotFoundError("Drive not found.");
 
-  const [slots, statusMap] = await Promise.all([
+  const [slots, statusMap, waitlistCount] = await Promise.all([
     prisma.slot.findMany({ where: { driveId } }),
     getUserBookingStatusMap(userId, [driveId]),
+    prisma.waitlist.count({ where: { driveId } }),
   ]);
   const myBookingStatus = statusMap.get(driveId) ?? "none";
 
@@ -138,7 +159,7 @@ export async function getDriveDetail(driveId: string, userId: string): Promise<D
   }
 
   return {
-    ...toDriveSummary(drive, slots, myBookingStatus),
+    ...toDriveSummary(drive, slots, myBookingStatus, waitlistCount),
     description: drive.description,
     lat: drive.lat,
     lng: drive.lng,
@@ -241,15 +262,26 @@ export async function listMyDrives(organizerId: string): Promise<{ items: DriveS
     orderBy: { date: "desc" },
   });
   const driveIds = drives.map((d) => d.id);
-  const slots = await prisma.slot.findMany({ where: { driveId: { in: driveIds } } });
+  const [slots, waitlistEntries] = await Promise.all([
+    prisma.slot.findMany({ where: { driveId: { in: driveIds } } }),
+    prisma.waitlist.findMany({ where: { driveId: { in: driveIds } } }),
+  ]);
   const slotsByDrive = new Map<string, Slot[]>();
   for (const slot of slots) {
     const list = slotsByDrive.get(slot.driveId) ?? [];
     list.push(slot);
     slotsByDrive.set(slot.driveId, list);
   }
+  const waitlistCountByDrive = new Map<string, number>();
+  for (const entry of waitlistEntries) {
+    waitlistCountByDrive.set(entry.driveId, (waitlistCountByDrive.get(entry.driveId) ?? 0) + 1);
+  }
   // myBookingStatus is meaningless for the organizer's own list — always "none".
-  return { items: drives.map((d) => toDriveSummary(d, slotsByDrive.get(d.id) ?? [], "none")) };
+  return {
+    items: drives.map((d) =>
+      toDriveSummary(d, slotsByDrive.get(d.id) ?? [], "none", waitlistCountByDrive.get(d.id) ?? 0),
+    ),
+  };
 }
 
 interface DriveInput {
@@ -287,7 +319,7 @@ export async function createDrive(organizerId: string, input: DriveInput): Promi
   });
 
   const slots = await prisma.slot.findMany({ where: { driveId: drive.id } });
-  return toDriveSummary(drive, slots, "none");
+  return toDriveSummary(drive, slots, "none", 0); // brand new drive — waitlist can't have entries yet
 }
 
 export async function updateDrive(
@@ -346,8 +378,11 @@ export async function updateDrive(
     return updated;
   });
 
-  const slots = await prisma.slot.findMany({ where: { driveId } });
-  return toDriveSummary(drive, slots, "none");
+  const [slots, waitlistCount] = await Promise.all([
+    prisma.slot.findMany({ where: { driveId } }),
+    prisma.waitlist.count({ where: { driveId } }),
+  ]);
+  return toDriveSummary(drive, slots, "none", waitlistCount);
 }
 
 export async function deleteDrive(organizerId: string, driveId: string): Promise<{ deleted: true }> {
@@ -395,7 +430,7 @@ export async function getMyDriveDetail(organizerId: string, driveId: string): Pr
   const totalCapacity = slots.reduce((sum, s) => sum + s.capacity, 0);
 
   return {
-    ...toDriveSummary(drive, slots, "none"),
+    ...toDriveSummary(drive, slots, "none", waitlistCount),
     description: drive.description,
     lat: drive.lat,
     lng: drive.lng,

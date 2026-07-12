@@ -85,16 +85,25 @@ export async function getHomeFeed(userId: string): Promise<HomeFeed> {
   const driveResults = await Promise.all(
     [homeCity, workCity].filter((c): c is NonNullable<typeof c> => Boolean(c)).map((c) => findDrivesNearPoint(c.lat, c.lng)),
   );
+  // Dedup by drive id, keeping the SMALLER of the two distances when a drive
+  // matches both home and work city — "nearest to the donor" means nearest of
+  // either origin, not whichever query happened to find it first.
   const dedupedDrives = new Map<string, (typeof driveResults)[number][number]>();
   for (const list of driveResults) {
-    for (const drive of list) dedupedDrives.set(drive.id, drive);
+    for (const drive of list) {
+      const existing = dedupedDrives.get(drive.id);
+      if (!existing || drive.distanceKm < existing.distanceKm) {
+        dedupedDrives.set(drive.id, drive);
+      }
+    }
   }
-  const drives = [...dedupedDrives.values()].sort((a, b) => a.date.getTime() - b.date.getTime());
+  const drives = [...dedupedDrives.values()];
 
   const driveIds = drives.map((d) => d.id);
-  const [slotsAll, statusMap] = await Promise.all([
+  const [slotsAll, statusMap, waitlistEntries] = await Promise.all([
     prisma.slot.findMany({ where: { driveId: { in: driveIds } } }),
     getUserBookingStatusMap(userId, driveIds),
+    prisma.waitlist.findMany({ where: { driveId: { in: driveIds } } }),
   ]);
   const slotsByDrive = new Map<string, typeof slotsAll>();
   for (const slot of slotsAll) {
@@ -102,10 +111,24 @@ export async function getHomeFeed(userId: string): Promise<HomeFeed> {
     list.push(slot);
     slotsByDrive.set(slot.driveId, list);
   }
+  const waitlistCountByDrive = new Map<string, number>();
+  for (const entry of waitlistEntries) {
+    waitlistCountByDrive.set(entry.driveId, (waitlistCountByDrive.get(entry.driveId) ?? 0) + 1);
+  }
 
-  const driveDtos = drives.map((d) =>
-    toDriveSummary(d, slotsByDrive.get(d.id) ?? [], statusMap.get(d.id) ?? "none"),
-  );
+  // Requirements §5/decision #29 — nearest-first, with isFullyBooked drives
+  // pushed after every bookable one regardless of distance.
+  const sortedDrives = [...drives].sort((a, b) => a.distanceKm - b.distanceKm);
+  const driveDtos = sortedDrives
+    .map((d) =>
+      toDriveSummary(
+        d,
+        slotsByDrive.get(d.id) ?? [],
+        statusMap.get(d.id) ?? "none",
+        waitlistCountByDrive.get(d.id) ?? 0,
+      ),
+    )
+    .sort((a, b) => Number(a.isFullyBooked) - Number(b.isFullyBooked));
 
   return { cooldown, alerts, urgentRequests, drives: driveDtos };
 }

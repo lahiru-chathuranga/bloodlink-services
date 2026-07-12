@@ -12,7 +12,7 @@ Before writing any code in `core-api/` or `chat-api/`, read the relevant guides 
 | [`../docs/requirements.md`](../docs/requirements.md) | Before implementing business logic whose exact rule isn't obvious from the contract alone (e.g. why cooldown checks the slot's date, not today). The product-level decisions log at the end is the fastest way to check if an ambiguity is already resolved. |
 | [`../docs/cities.md`](../docs/cities.md) | Before writing or touching the `City` seed script, or any Haversine/proximity query. Verified coordinates, the seed-by-slug ID convention correction, and the reference SQL/JS distance formula. |
 | [`../docs/userflow.md`](../docs/userflow.md) | Before implementing an endpoint whose *purpose* is unclear from `api-contract.md` alone — §5's screen specs explain which mobile screen calls it and why, which is often the fastest way to understand an endpoint's edge cases. |
-| [`../docs/eligibility-questions.md`](../docs/eligibility-questions.md) | Only if the team has explicitly adopted the 10-question eligibility set. Otherwise the live canonical set lives in `../docs/data-model.md` §6 — don't build `eligibility.service.ts`'s validation logic against this file by default. |
+| [`../docs/eligibility-questions.md`](../docs/eligibility-questions.md) | Only if the team has explicitly adopted the 10-question eligibility set — and even then, this is a `bloodlink-mobile` concern, not `core-api`'s: the eligibility MCQ is validated entirely client-side (`requirements.md` decision #30), so `core-api` has no eligibility route/controller/service to build against this file at all. |
 
 ## Local docs (`docs/`) — read second
 

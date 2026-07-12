@@ -26,6 +26,8 @@ bloodlink-backend/
 
 `core-api` and `chat-api` are **independently deployable** — separate `package.json`, separate `Dockerfile`, separate Render Web Service, separate Root Directory. They connect to the same Neon Postgres database (see `decisions-log.md` B1) but each Prisma schema only defines the models that service is allowed to touch. **Never import or query a table outside a service's own ownership list above, even though the DB technically allows it.**
 
+No `eligibility` table exists, and `core-api` has no eligibility route/controller/service — the F4 MCQ is validated entirely client-side (`requirements.md` decision #30, `data-model.md` §6). Don't add one back without checking that decision first.
+
 Services **never call each other at runtime** (`decisions-log.md` A3). If a task seems to need `chat-api` to read something from `core-api`'s tables, that's a signal to re-read the requirements — it almost certainly doesn't, since the chatbot is general-FAQ only.
 
 ---
@@ -43,7 +45,6 @@ core-api/src/
 │   ├── users.routes.ts
 │   ├── drives.routes.ts      # also owns all /organizer/drives* routes, per api-contract.md §5
 │   ├── bookings.routes.ts
-│   ├── eligibility.routes.ts
 │   ├── urgent-requests.routes.ts  # also owns GET /staff/donors, per api-contract.md §5
 │   ├── donations.routes.ts
 │   ├── reference.routes.ts   # GET /reference/cities — addendum, api-contract.md §5/C4
@@ -54,7 +55,6 @@ core-api/src/
 │   ├── users.controller.ts
 │   ├── drives.controller.ts
 │   ├── bookings.controller.ts
-│   ├── eligibility.controller.ts
 │   ├── urgent-requests.controller.ts
 │   ├── donations.controller.ts
 │   ├── reference.controller.ts
@@ -64,7 +64,6 @@ core-api/src/
 │   ├── users.service.ts
 │   ├── drives.service.ts
 │   ├── bookings.service.ts   # one-active-booking rule, cooldown-vs-slot-date live here
-│   ├── eligibility.service.ts
 │   ├── urgent-requests.service.ts
 │   ├── donations.service.ts
 │   ├── reference.service.ts
@@ -132,7 +131,7 @@ Request flow is always: **route → middleware → controller → service → Pr
 - **`routes/`** — declares the path, HTTP method, and which middleware/controller handles it. No logic, no Prisma calls, no business rules. If a route file is doing anything besides wiring, it's misplaced.
 - **`middleware/`** — cross-cutting concerns only: auth, role gates, rate limiting, request validation, error formatting. Never resource-specific business logic.
 - **`controllers/`** — parses/validates the request (via the `schemas/` Zod schema + `validate.ts` middleware), calls exactly one service function, shapes the service's result into the response envelope (`API_CONVENTIONS.md`). Controllers do not talk to Prisma directly and do not contain business rules — they orchestrate.
-- **`services/`** — all business logic and all Prisma calls live here. This is where invariants from `decisions-log.md` and `requirement.md`'s decisions log get enforced (one-active-booking-system-wide, cooldown-vs-slot-date, waitlist max 10 per-drive, OTP purpose matching, eligibility pass gating booking, etc.). A controller should never need to re-derive one of these rules — if it's checking business state, that check belongs in a service function instead.
+- **`services/`** — all business logic and all Prisma calls live here. This is where invariants from `decisions-log.md` and `requirement.md`'s decisions log get enforced (one-active-booking-system-wide, cooldown-vs-slot-date, waitlist max 10 per-drive, OTP purpose matching, etc.). A controller should never need to re-derive one of these rules — if it's checking business state, that check belongs in a service function instead.
 - **`lib/`** — stateless helpers and third-party client wrappers (Prisma client singleton, mailer, QR gen, Dialogflow client, logger). No Express-specific code here — these should be usable/testable outside the HTTP layer.
 
 ## File naming convention
