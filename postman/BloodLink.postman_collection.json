@@ -320,7 +320,7 @@
           }
         },
         {
-          "name": "forgot-password",
+          "name": "1. forgot-password",
           "request": {
             "method": "POST",
             "header": [
@@ -342,7 +342,40 @@
           }
         },
         {
-          "name": "reset-password — paste the reset code you received",
+          "name": "2. verify-otp (purpose: reset_password) — paste the code you received",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{coreApiUrl}}/auth/verify-otp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{donorEmail}}\",\n  \"code\": \"{{otpCode}}\",\n  \"purpose\": \"reset_password\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"valid true\", () => pm.expect(pm.response.json().data.valid).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. reset-password — same code as step 2",
           "request": {
             "method": "POST",
             "header": [
@@ -364,7 +397,7 @@
           }
         }
       ],
-      "description": "Set `donorEmail` in the environment to a real inbox you can read (defaults to the Gmail you gave me). Run 1→2→3 in order the first time; after that just use 'login'."
+      "description": "Set `donorEmail` in the environment to a real inbox you can read (defaults to the Gmail you gave me). Run 1→2→3 in order the first time; after that just use 'login'.\n\nIMPORTANT: `POST /auth/reset-password` only accepts a code that was already confirmed via `POST /auth/verify-otp` for the same email+purpose — calling reset-password directly with a fresh, never-verified code returns `401 OTP_NOT_VERIFIED` even though the code itself is valid. Same applies to the register flow's set-password (step 3 up top) — that's why it comes after verify-otp there too.\n\nAlso: OTP codes expire after 10 minutes (`OTP_TTL_MINUTES` in `auth.service.ts`) — if you paused between forgot-password/check-email and using the code, request a fresh one rather than reusing an old code from earlier in your session."
     },
     {
       "name": "02 Users & Profile",
