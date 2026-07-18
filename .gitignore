@@ -1,0 +1,3 @@
+# Postman environment files contain real local secrets (admin secret, etc.) —
+# never commit them. The collection.json itself has no secrets and is fine to share.
+postman/*.postman_environment.json
