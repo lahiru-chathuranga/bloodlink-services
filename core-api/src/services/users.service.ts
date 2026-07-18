@@ -4,7 +4,7 @@ import { ApiError, NotFoundError } from "../lib/errors";
 import { logger } from "../lib/logger";
 import { generateQrIdentifier } from "../lib/qr";
 import { prisma } from "../lib/prisma";
-import { uploadFile } from "../lib/storage";
+import { deleteFile, uploadFile } from "../lib/storage";
 import type { AlertDto } from "../constants/alerts";
 
 export interface UserProfile {
@@ -128,6 +128,10 @@ export async function updateProfile(userId: string, input: UpdateProfileInput): 
       qrIdentifier: existing.qrIdentifier ?? generateQrIdentifier(),
     },
   });
+
+  if (input.avatarUrl && existing.avatarUrl && input.avatarUrl !== existing.avatarUrl) {
+    void deleteFile(existing.avatarUrl);
+  }
 
   return toUserProfile(user);
 }

@@ -2,6 +2,7 @@ import type { Drive, Slot } from "@prisma/client";
 import { decryptField } from "../lib/encryption";
 import { ApiError, ConflictError, ForbiddenError, NotFoundError } from "../lib/errors";
 import { prisma } from "../lib/prisma";
+import { deleteFile } from "../lib/storage";
 import { toDonorContact, type DonorContactDto } from "./users.service";
 
 const WAITLIST_MAX = 10;
@@ -387,6 +388,10 @@ export async function updateDrive(
 
     return updated;
   });
+
+  if (input.posterUrl && existing.posterUrl && input.posterUrl !== existing.posterUrl) {
+    void deleteFile(existing.posterUrl);
+  }
 
   const [slots, waitlistCount] = await Promise.all([
     prisma.slot.findMany({ where: { driveId } }),

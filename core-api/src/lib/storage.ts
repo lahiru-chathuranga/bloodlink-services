@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { env } from "../config/env";
 import { logger } from "./logger";
 
@@ -45,4 +45,27 @@ export async function uploadFile(
   return env.r2PublicBaseUrl
     ? `${env.r2PublicBaseUrl.replace(/\/$/, "")}/${key}`
     : `https://${env.r2BucketName}.${env.r2AccountId}.r2.cloudflarestorage.com/${key}`;
+}
+
+// Best-effort cleanup of a file being replaced (new avatar/poster uploaded
+// over an old one). Object keys never contain "/" (see the `key` built
+// above), so the last URL path segment is always the R2 key regardless of
+// which base URL format produced it. Never throws — a failed delete must
+// not block the profile/drive update that triggered it.
+export async function deleteFile(url: string): Promise<void> {
+  if (!r2Client || !env.r2BucketName) return;
+
+  let key: string | undefined;
+  try {
+    key = decodeURIComponent(new URL(url).pathname.split("/").filter(Boolean).pop() ?? "");
+  } catch {
+    return;
+  }
+  if (!key) return;
+
+  try {
+    await r2Client.send(new DeleteObjectCommand({ Bucket: env.r2BucketName, Key: key }));
+  } catch (error) {
+    logger.warn({ error, key }, "[storage] failed to delete replaced file from R2");
+  }
 }
