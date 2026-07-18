@@ -1,0 +1,1261 @@
+{
+  "info": {
+    "_postman_id": "b1a0d1e0-0000-4000-8000-000000000001",
+    "name": "BloodLink — Local Backend",
+    "description": "Full local test collection for bloodlink-services (core-api + chat-api), matching docs/api-contract.md.\n\nSETUP:\n1. Import the companion 'BloodLink Local.postman_environment.json' and select it (top-right environment picker).\n2. Start both servers: `cd core-api && npm run dev` (port 4000) and `cd chat-api && npm run dev` (port 4001).\n3. Run '00 Health' first to confirm both are up.\n4. Run 'Auth' folder top to bottom for a normal donor account — check-email creates + sends the OTP, read it from your Gmail inbox (or the core-api terminal log if RESEND/GMAIL isn't configured), paste it into verify-otp/set-password. The 'token' collection variable auto-saves after set-password/login.\n5. For the Organizer/Staff-only folders, see each folder's description for how to flip isOrganizer/isHospitalStaff (a manual DB update, per decision #3 — there's no self-serve endpoint).\n6. Most `:id` path segments (driveId, slotId, requestId, donationId...) are collection variables auto-captured by 'Tests' scripts on the requests that create them — run creates before reads/updates in each folder.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "coreApiUrl",
+      "value": "http://localhost:4000"
+    },
+    {
+      "key": "chatApiUrl",
+      "value": "http://localhost:4001"
+    },
+    {
+      "key": "adminSecret",
+      "value": ""
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "userId",
+      "value": ""
+    },
+    {
+      "key": "organizerToken",
+      "value": ""
+    },
+    {
+      "key": "organizerUserId",
+      "value": ""
+    },
+    {
+      "key": "staffToken",
+      "value": ""
+    },
+    {
+      "key": "staffUserId",
+      "value": ""
+    },
+    {
+      "key": "otpCode",
+      "value": ""
+    },
+    {
+      "key": "cityId",
+      "value": "colombo"
+    },
+    {
+      "key": "driveId",
+      "value": ""
+    },
+    {
+      "key": "slotId",
+      "value": ""
+    },
+    {
+      "key": "requestId",
+      "value": ""
+    },
+    {
+      "key": "waitlistTargetUserId",
+      "value": ""
+    },
+    {
+      "key": "donationBookingQr",
+      "value": ""
+    },
+    {
+      "key": "donationId",
+      "value": ""
+    },
+    {
+      "key": "alertId",
+      "value": ""
+    },
+    {
+      "key": "staffInviteEmail",
+      "value": ""
+    },
+    {
+      "key": "staffInviteUserId",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "00 Health",
+      "item": [
+        {
+          "name": "core-api health",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{coreApiUrl}}/health"
+          }
+        },
+        {
+          "name": "chat-api health",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{chatApiUrl}}/health"
+          }
+        }
+      ]
+    },
+    {
+      "name": "01 Auth — Donor Register",
+      "item": [
+        {
+          "name": "1. check-email (new donor)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{coreApiUrl}}/auth/check-email",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{donorEmail}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is not_found\", () => { const j = pm.response.json(); pm.expect(j.data.status).to.eql(\"not_found\"); pm.expect(j.data.otpSent).to.be.true; });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. verify-otp — paste the code you received",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{coreApiUrl}}/auth/verify-otp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{donorEmail}}\",\n  \"code\": \"{{otpCode}}\",\n  \"purpose\": \"register\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"valid true\", () => pm.expect(pm.response.json().data.valid).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. set-password (creates the user, returns token)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{coreApiUrl}}/auth/set-password",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{donorEmail}}\",\n  \"password\": \"Test1234!\",\n  \"purpose\": \"register\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.success && json.data && json.data.token) {",
+                  "  pm.collectionVariables.set(\"token\", json.data.token);",
+                  "  pm.collectionVariables.set(\"userId\", json.data.user.id);",
+                  "  console.log(\"Saved token + userId for\", json.data.user.email);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "check-email (existing, registered)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{coreApiUrl}}/auth/check-email",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{donorEmail}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is registered\", () => pm.expect(pm.response.json().data.status).to.eql(\"registered\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{coreApiUrl}}/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{donorEmail}}\",\n  \"password\": \"Test1234!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.success && json.data && json.data.token) {",
+                  "  pm.collectionVariables.set(\"token\", json.data.token);",
+                  "  pm.collectionVariables.set(\"userId\", json.data.user.id);",
+                  "  console.log(\"Saved token + userId for\", json.data.user.email);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "resend-otp",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{coreApiUrl}}/auth/resend-otp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{donorEmail}}\",\n  \"purpose\": \"register\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "forgot-password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{coreApiUrl}}/auth/forgot-password",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{donorEmail}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "reset-password — paste the reset code you received",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{coreApiUrl}}/auth/reset-password",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{donorEmail}}\",\n  \"code\": \"{{otpCode}}\",\n  \"newPassword\": \"NewTest1234!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "description": "Set `donorEmail` in the environment to a real inbox you can read (defaults to the Gmail you gave me). Run 1→2→3 in order the first time; after that just use 'login'."
+    },
+    {
+      "name": "02 Users & Profile",
+      "item": [
+        {
+          "name": "GET /users/me",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/users/me"
+          }
+        },
+        {
+          "name": "PATCH /users/me/profile",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/users/me/profile",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Test Donor\",\n  \"phone\": \"0771234567\",\n  \"bloodType\": \"O+\",\n  \"homeCityId\": \"{{cityId}}\",\n  \"workCityId\": \"{{cityId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "PATCH /users/me/visibility",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/users/me/visibility",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"visibleToUrgentRequests\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /uploads/avatar (multipart — attach a file manually)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": "{{coreApiUrl}}/uploads/avatar"
+          }
+        },
+        {
+          "name": "POST /users/me/organizer-request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/users/me/organizer-request",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nic\": \"991234567V\",\n  \"address\": \"123 Main St, Colombo\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /users/me/donations",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/users/me/donations"
+          }
+        },
+        {
+          "name": "GET /users/me/donations/:id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/users/me/donations/{{donationId}}"
+          }
+        },
+        {
+          "name": "GET /users/me/alerts",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/users/me/alerts"
+          }
+        },
+        {
+          "name": "PATCH /users/me/alerts/:id/read",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/users/me/alerts/{{alertId}}/read"
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 Home Feed",
+      "item": [
+        {
+          "name": "GET /home/feed",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/home/feed"
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 Drives — Donor-Facing",
+      "item": [
+        {
+          "name": "GET /drives/:id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/drives/{{driveId}}"
+          }
+        },
+        {
+          "name": "GET /drives/:id/slots",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/drives/{{driveId}}/slots"
+          }
+        },
+        {
+          "name": "POST /drives/:id/waitlist",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/drives/{{driveId}}/waitlist"
+          }
+        },
+        {
+          "name": "DELETE /drives/:id/waitlist/me",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/drives/{{driveId}}/waitlist/me"
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 Bookings",
+      "item": [
+        {
+          "name": "POST /bookings",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"driveId\": \"{{driveId}}\",\n  \"slotId\": \"{{slotId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"201 confirmed\", () => { pm.response.to.have.status(201); pm.expect(pm.response.json().data.status).to.eql(\"confirmed\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE /bookings/me",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/bookings/me"
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 Organizer — Drive Management",
+      "item": [
+        {
+          "name": "GET /organizer/drives",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{organizerToken}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/organizer/drives"
+          }
+        },
+        {
+          "name": "POST /organizer/drives",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{organizerToken}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/organizer/drives",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Postman Test Drive\",\n  \"description\": \"Created from the local Postman test collection.\",\n  \"venue\": \"Town Hall\",\n  \"cityId\": \"{{cityId}}\",\n  \"date\": \"2026-12-01\",\n  \"slots\": [\n    {\n      \"startTime\": \"09:00\",\n      \"capacity\": 2\n    },\n    {\n      \"startTime\": \"10:00\",\n      \"capacity\": 2\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.collectionVariables.set(\"driveId\", j.data.id);",
+                  "pm.collectionVariables.set(\"slotId\", j.data.slots[0].id);",
+                  "pm.test(\"201 created\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH /organizer/drives/:id",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{organizerToken}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/organizer/drives/{{driveId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Postman Test Drive (edited)\",\n  \"description\": \"Updated via Postman.\",\n  \"venue\": \"Town Hall, Room 2\",\n  \"cityId\": \"{{cityId}}\",\n  \"date\": \"2026-12-01\",\n  \"slots\": [\n    {\n      \"startTime\": \"09:00\",\n      \"capacity\": 3\n    },\n    {\n      \"startTime\": \"10:00\",\n      \"capacity\": 2\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /organizer/drives/:id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{organizerToken}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/organizer/drives/{{driveId}}"
+          }
+        },
+        {
+          "name": "GET /organizer/drives/:id/slots/:slotId/bookings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{organizerToken}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/organizer/drives/{{driveId}}/slots/{{slotId}}/bookings"
+          }
+        },
+        {
+          "name": "GET /organizer/drives/:id/waitlist",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{organizerToken}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/organizer/drives/{{driveId}}/waitlist"
+          }
+        },
+        {
+          "name": "POST /organizer/drives/:id/waitlist/:userId/notify",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{organizerToken}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/organizer/drives/{{driveId}}/waitlist/{{waitlistTargetUserId}}/notify"
+          }
+        },
+        {
+          "name": "DELETE /organizer/drives/:id",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{organizerToken}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/organizer/drives/{{driveId}}"
+          }
+        }
+      ],
+      "description": "These calls need a token from a user with isOrganizer:true — that flag has no self-serve endpoint (decision #3), so after registering a donor via '01 Auth', flip isOrganizer manually in Neon (or ask me to run a one-off script), then log in again and paste the resulting token into the `organizerToken` environment variable."
+    },
+    {
+      "name": "07 QR / Donations",
+      "item": [
+        {
+          "name": "POST /organizer/drives/:id/donations (by qrIdentifier)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{organizerToken}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/organizer/drives/{{driveId}}/donations",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"qrIdentifier\": \"{{donationBookingQr}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  pm.collectionVariables.set(\"donationId\", pm.response.json().data.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /organizer/drives/:id/donations (manual by userId)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{organizerToken}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/organizer/drives/{{driveId}}/donations",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{userId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /organizer/drives/:id/donation-stats",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{organizerToken}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/organizer/drives/{{driveId}}/donation-stats"
+          }
+        }
+      ],
+      "description": "`donationBookingQr` is the DONOR's own `qrIdentifier` from their GET /users/me response (My QR Code screen) — the donor must have a `confirmed` booking on `driveId` first (run 05 Bookings as that donor)."
+    },
+    {
+      "name": "08 Urgent Requests + Staff Search",
+      "item": [
+        {
+          "name": "POST /requests",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/requests",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bloodType\": \"O+\",\n  \"hospitalName\": \"National Hospital\",\n  \"hospitalCityId\": \"{{cityId}}\",\n  \"contactPhone\": \"0771234567\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.collectionVariables.set(\"requestId\", j.data.id);",
+                  "pm.test(\"201 created, isMine true\", () => { pm.response.to.have.status(201); pm.expect(j.data.isMine).to.be.true; });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /requests?scope=active",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/requests?scope=active"
+          }
+        },
+        {
+          "name": "GET /requests?scope=mine",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/requests?scope=mine"
+          }
+        },
+        {
+          "name": "GET /requests/:id (requester profile)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/requests/{{requestId}}"
+          }
+        },
+        {
+          "name": "PATCH /requests/:id/complete",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/requests/{{requestId}}/complete"
+          }
+        },
+        {
+          "name": "GET /staff/donors (needs staffToken)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{staffToken}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/staff/donors?bloodType=O+&cityId={{cityId}}"
+          }
+        }
+      ],
+      "description": "Staff-only request needs `staffToken` — see '10 Admin' folder to invite a staff account, then log that account in via '01 Auth' (same login endpoint, purpose is only relevant for the initial set-password step) and paste its token into `staffToken`."
+    },
+    {
+      "name": "09 Reference",
+      "item": [
+        {
+          "name": "GET /reference/cities",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{coreApiUrl}}/reference/cities"
+          }
+        }
+      ]
+    },
+    {
+      "name": "10 Admin",
+      "item": [
+        {
+          "name": "POST /admin/staff-invite",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Admin-Secret",
+                "value": "{{adminSecret}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/admin/staff-invite",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{staffInviteEmail}}\",\n  \"hospitalName\": \"National Hospital\",\n  \"hospitalRegId\": \"REG-001\",\n  \"position\": \"Staff Nurse\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.collectionVariables.set(\"staffInviteUserId\", j.data.userId);",
+                  "pm.test(\"201 invited\", () => { pm.response.to.have.status(201); pm.expect(j.data.status).to.eql(\"invited\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /admin/staff/:id",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Admin-Secret",
+                "value": "{{adminSecret}}"
+              }
+            ],
+            "url": "{{coreApiUrl}}/admin/staff/{{staffInviteUserId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"hospitalName\": \"National Hospital\",\n  \"hospitalRegId\": \"REG-002\",\n  \"position\": \"Senior Staff Nurse\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "description": "Set `staffInviteEmail` to a second real inbox (or the same Gmail with a +alias like yourname+staff@gmail.com) so you can complete that account's onboarding via '01 Auth' with purpose `staff_invite`, then paste its token into `staffToken`."
+    },
+    {
+      "name": "11 Chat (chat-api)",
+      "item": [
+        {
+          "name": "GET /chat/history",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{chatApiUrl}}/chat/history"
+          }
+        },
+        {
+          "name": "POST /chat/messages",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{chatApiUrl}}/chat/messages",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Can I donate blood if I have a cold?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test(\"201, both messages persisted\", () => {",
+                  "  pm.response.to.have.status(201);",
+                  "  pm.expect(j.data.userMessage.sender).to.eql(\"user\");",
+                  "  pm.expect(j.data.botMessage.sender).to.eql(\"bot\");",
+                  "});",
+                  "console.log(\"matchedIntent:\", j.data.botMessage.matchedIntent, \"(null means canned-fallback path, not real Dialogflow)\");"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
