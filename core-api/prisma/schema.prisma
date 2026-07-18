@@ -39,12 +39,6 @@ enum RequestStatus {
   closed
 }
 
-enum UrgencyLevel {
-  normal
-  urgent
-  critical
-}
-
 enum AlertType {
   booking_cancelled
   waitlist_opening
@@ -179,8 +173,7 @@ model Booking {
   driveId String // denormalized off slot
   drive   Drive  @relation(fields: [driveId], references: [id])
 
-  eligibilityResult Json // { passed: true, answers: Record<string,string> }
-  status            BookingStatus @default(confirmed)
+  status BookingStatus @default(confirmed)
 
   createdAt   DateTime  @default(now())
   cancelledAt DateTime?
@@ -207,7 +200,6 @@ model UrgentRequest {
   postedBy       String
   poster         User          @relation(fields: [postedBy], references: [id])
   bloodType      String // plain — see data-model.md §5
-  urgencyLevel   UrgencyLevel
   hospitalName   String
   hospitalCityId String
   hospitalCity   City          @relation(fields: [hospitalCityId], references: [id])

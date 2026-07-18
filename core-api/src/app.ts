@@ -6,7 +6,6 @@ import authRoutes from "./routes/auth.routes";
 import bookingsRoutes from "./routes/bookings.routes";
 import donationsRoutes from "./routes/donations.routes";
 import drivesRoutes from "./routes/drives.routes";
-import eligibilityRoutes from "./routes/eligibility.routes";
 import healthRoutes from "./routes/health.routes";
 import homeRoutes from "./routes/home.routes";
 import referenceRoutes from "./routes/reference.routes";
@@ -24,7 +23,6 @@ export function createApp(): Express {
   app.use(usersRoutes);
   app.use(homeRoutes);
   app.use(drivesRoutes);
-  app.use(eligibilityRoutes);
   app.use(bookingsRoutes);
   app.use(donationsRoutes);
   app.use(urgentRequestsRoutes);

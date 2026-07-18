@@ -4,7 +4,7 @@ import { ok } from "../lib/response";
 import * as urgentRequestsService from "../services/urgent-requests.service";
 
 export async function listRequests(req: Request, res: Response): Promise<void> {
-  const scope = req.query.scope as "active" | "history";
+  const scope = req.query.scope as "active" | "mine";
   const result = await urgentRequestsService.listRequestsForUser(req.user!.userId, scope);
   ok(res, result);
 }

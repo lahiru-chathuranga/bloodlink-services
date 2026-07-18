@@ -1,52 +1,75 @@
-import type { UrgencyLevel, UrgentRequest } from "@prisma/client";
+import type { User, UrgentRequest } from "@prisma/client";
 import { decryptField } from "../lib/encryption";
 import { ApiError, ForbiddenError, NotFoundError } from "../lib/errors";
 import { prisma } from "../lib/prisma";
 import { toDonorContact, type DonorContactDto } from "./users.service";
 
 const MATCH_RADIUS_KM = 20;
-const URGENCY_RANK: Record<UrgencyLevel, number> = { critical: 2, urgent: 1, normal: 0 };
 
 export interface UrgentRequestSummaryDto {
   id: string;
   bloodType: string;
-  urgencyLevel: UrgencyLevel;
   hospitalName: string;
   hospitalCityId: string;
+  contactPhone: string;
   status: string;
+  isMine: boolean;
   createdAt: string;
 }
 
-export interface UrgentRequestDetailDto extends UrgentRequestSummaryDto {
-  contactPhone: string;
-  postedBy: string;
-  isMine: boolean;
+export interface RequesterProfileDto {
+  id: string;
+  fullName: string;
+  email: string;
+  avatarUrl: string | null;
+  hospitalName: string | null;
+  isHospitalStaff: boolean;
+  position: string | null;
 }
 
-export function toSummary(req: UrgentRequest): UrgentRequestSummaryDto {
+export interface UrgentRequestDetailDto extends UrgentRequestSummaryDto {
+  postedBy: string;
+  requester: RequesterProfileDto;
+}
+
+export function toSummary(req: UrgentRequest, callerId: string): UrgentRequestSummaryDto {
   return {
     id: req.id,
     bloodType: req.bloodType,
-    urgencyLevel: req.urgencyLevel,
     hospitalName: req.hospitalName,
     hospitalCityId: req.hospitalCityId,
+    contactPhone: req.contactPhone,
     status: req.status,
+    isMine: req.postedBy === callerId,
     createdAt: req.createdAt.toISOString(),
   };
 }
 
-export function toDetail(req: UrgentRequest, callerId: string): UrgentRequestDetailDto {
+function toRequesterProfile(user: User): RequesterProfileDto {
   return {
-    ...toSummary(req),
-    contactPhone: req.contactPhone,
+    id: user.id,
+    fullName: user.fullName ?? "",
+    email: user.email,
+    avatarUrl: user.avatarUrl,
+    hospitalName: user.hospitalName,
+    isHospitalStaff: user.isHospitalStaff,
+    position: user.position,
+  };
+}
+
+export function toDetail(
+  req: UrgentRequest & { poster: User },
+  callerId: string,
+): UrgentRequestDetailDto {
+  return {
+    ...toSummary(req, callerId),
     postedBy: req.postedBy,
-    isMine: req.postedBy === callerId,
+    requester: toRequesterProfile(req.poster),
   };
 }
 
 interface CreateRequestInput {
   bloodType: string;
-  urgencyLevel: UrgencyLevel;
   hospitalName: string;
   hospitalCityId: string;
   contactPhone: string;
@@ -65,13 +88,78 @@ export async function createRequest(
     data: {
       postedBy: userId,
       bloodType: input.bloodType,
-      urgencyLevel: input.urgencyLevel,
       hospitalName: input.hospitalName,
       hospitalCityId: input.hospitalCityId,
       contactPhone: input.contactPhone,
     },
   });
-  return toSummary(created);
+  return toSummary(created, userId);
+}
+
+// Haversine SQL against UrgentRequest joined to City for hospitalCityId's coordinates.
+// A request always matches if the caller posted it themselves — bloodType is the
+// *requested* type, independent of the poster's own blood type, so "My Requests"
+// must surface a poster's own post regardless of whether it matches their type.
+async function findActiveRequestsForUser(
+  userId: string,
+  bloodType: string,
+  lat: number,
+  lng: number,
+): Promise<UrgentRequest[]> {
+  return prisma.$queryRaw<UrgentRequest[]>`
+    SELECT ur.* FROM "UrgentRequest" ur
+    JOIN "City" c ON c.id = ur."hospitalCityId"
+    WHERE ur.status = 'open'
+      AND (
+        ur."postedBy" = ${userId}
+        OR (
+          ur."bloodType" = ${bloodType}
+          AND (6371 * acos(
+            cos(radians(${lat})) * cos(radians(c.lat)) *
+            cos(radians(c.lng) - radians(${lng})) +
+            sin(radians(${lat})) * sin(radians(c.lat))
+          )) <= ${MATCH_RADIUS_KM}
+        )
+      )
+    ORDER BY ur."createdAt" DESC
+  `;
+}
+
+// Used by GET /requests?scope=active|mine — api-contract.md §2.9.
+// scope=active: open requests matching the caller's blood type within 20km of
+// home, plus every request the caller posted themselves (any match). scope=mine
+// is the caller's own full request log, any status — not community history.
+export async function listRequestsForUser(
+  userId: string,
+  scope: "active" | "mine",
+): Promise<{ items: UrgentRequestSummaryDto[] }> {
+  if (scope === "mine") {
+    const items = await prisma.urgentRequest.findMany({
+      where: { postedBy: userId },
+      orderBy: { createdAt: "desc" },
+    });
+    return { items: items.map((r) => toSummary(r, userId)) };
+  }
+
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw new NotFoundError("User not found.");
+
+  const bloodType = user.bloodType ? decryptField(user.bloodType) : null;
+  const homeCity = user.homeCityId
+    ? await prisma.city.findUnique({ where: { id: user.homeCityId } })
+    : null;
+
+  // Without a bloodType/homeCity we can't compute the proximity match, but the
+  // caller's own posted requests should still show up under "My Requests".
+  const items =
+    bloodType && homeCity
+      ? await findActiveRequestsForUser(userId, bloodType, homeCity.lat, homeCity.lng)
+      : await prisma.urgentRequest.findMany({
+          where: { status: "open", postedBy: userId },
+          orderBy: { createdAt: "desc" },
+        });
+
+  return { items: items.map((r) => toSummary(r, userId)) };
 }
 
 // Haversine SQL against UrgentRequest joined to City for hospitalCityId's coordinates.
@@ -89,45 +177,16 @@ async function findRequestsNearPoint(
         cos(radians(c.lng) - radians(${lng})) +
         sin(radians(${lat})) * sin(radians(c.lat))
       )) <= ${MATCH_RADIUS_KM}
+    ORDER BY ur."createdAt" DESC
   `;
-}
-
-function sortByUrgencyThenDate(items: UrgentRequest[], dateDesc: boolean): UrgentRequest[] {
-  return [...items].sort((a, b) => {
-    const urgencyDiff = URGENCY_RANK[b.urgencyLevel] - URGENCY_RANK[a.urgencyLevel];
-    if (urgencyDiff !== 0) return urgencyDiff;
-    const dateDiff = b.createdAt.getTime() - a.createdAt.getTime();
-    return dateDesc ? dateDiff : -dateDiff;
-  });
-}
-
-// Used by GET /requests?scope=active|history — api-contract.md §2.9.
-export async function listRequestsForUser(
-  userId: string,
-  scope: "active" | "history",
-): Promise<{ items: UrgentRequestSummaryDto[] }> {
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user) throw new NotFoundError("User not found.");
-
-  const bloodType = user.bloodType ? decryptField(user.bloodType) : null;
-  if (!bloodType || !user.homeCityId) {
-    return { items: [] };
-  }
-
-  const homeCity = await prisma.city.findUnique({ where: { id: user.homeCityId } });
-  if (!homeCity) return { items: [] };
-
-  const statuses = scope === "active" ? ["open"] : ["completed", "closed"];
-  const nearby = await findRequestsNearPoint(homeCity.lat, homeCity.lng, statuses);
-  const matching = nearby.filter((r) => r.bloodType === bloodType);
-  const sorted = sortByUrgencyThenDate(matching, scope === "history");
-  return { items: sorted.map(toSummary) };
 }
 
 // Used by GET /home/feed's urgentRequests section — same matching rule, but keyed
 // off both home AND work city per HomeFeed's convention (api-contract.md §1), and
 // caller passes decrypted bloodType directly since home.service already has it.
+// No "OR postedBy=caller" carve-out here — the Home Feed has no "mine" section.
 export async function getMatchingRequestsForFeed(
+  userId: string,
   bloodType: string | null,
   cityIds: string[],
 ): Promise<UrgentRequestSummaryDto[]> {
@@ -141,12 +200,12 @@ export async function getMatchingRequestsForFeed(
       if (r.bloodType === bloodType) seen.set(r.id, r);
     }
   }
-  const sorted = sortByUrgencyThenDate([...seen.values()], true);
-  return sorted.map(toSummary);
+  const sorted = [...seen.values()].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  return sorted.map((r) => toSummary(r, userId));
 }
 
 export async function getRequestById(id: string, callerId: string): Promise<UrgentRequestDetailDto> {
-  const req = await prisma.urgentRequest.findUnique({ where: { id } });
+  const req = await prisma.urgentRequest.findUnique({ where: { id }, include: { poster: true } });
   if (!req) throw new NotFoundError("Urgent request not found.");
   return toDetail(req, callerId);
 }
@@ -163,7 +222,11 @@ export async function completeRequest(
     throw new ForbiddenError("Only the poster or hospital staff can mark this request complete.");
   }
 
-  const updated = await prisma.urgentRequest.update({ where: { id }, data: { status: "completed" } });
+  const updated = await prisma.urgentRequest.update({
+    where: { id },
+    data: { status: "completed" },
+    include: { poster: true },
+  });
   return toDetail(updated, callerId);
 }
 

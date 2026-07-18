@@ -1,6 +1,5 @@
 import type { Booking } from "@prisma/client";
 import { ConflictError, NotFoundError } from "../lib/errors";
-import { verifyEligibilityToken } from "../lib/jwt";
 import { prisma } from "../lib/prisma";
 import { getUserOrThrow } from "./users.service";
 import { toSlotDto, type SlotDto } from "./drives.service";
@@ -12,7 +11,6 @@ export interface BookingDto {
   userId: string;
   slotId: string;
   driveId: string;
-  eligibilityResult: unknown;
   status: string;
   createdAt: string;
   cancelledAt: string | null;
@@ -24,7 +22,6 @@ function toBookingDto(booking: Booking): BookingDto {
     userId: booking.userId,
     slotId: booking.slotId,
     driveId: booking.driveId,
-    eligibilityResult: booking.eligibilityResult,
     status: booking.status,
     createdAt: booking.createdAt.toISOString(),
     cancelledAt: booking.cancelledAt ? booking.cancelledAt.toISOString() : null,
@@ -59,19 +56,7 @@ export async function createBooking(
   userId: string,
   driveId: string,
   slotId: string,
-  eligibilityToken: string,
 ): Promise<BookingDto> {
-  // 1. eligibilityToken signature/expiry/driveId match
-  let tokenPayload;
-  try {
-    tokenPayload = verifyEligibilityToken(eligibilityToken);
-  } catch {
-    throw new ConflictError("ELIGIBILITY_TOKEN_INVALID", "Your eligibility check has expired — please retake it.");
-  }
-  if (tokenPayload.userId !== userId || tokenPayload.driveId !== driveId || !tokenPayload.passed) {
-    throw new ConflictError("ELIGIBILITY_TOKEN_INVALID", "Your eligibility check does not match this booking.");
-  }
-
   const slot = await prisma.slot.findUnique({ where: { id: slotId }, include: { drive: true } });
   if (!slot || slot.driveId !== driveId) {
     throw new NotFoundError("Slot not found on this drive.");
@@ -79,19 +64,19 @@ export async function createBooking(
 
   const user = await getUserOrThrow(userId);
 
-  // 2. Cooldown vs. the drive's date, not today
+  // 1. Cooldown vs. the drive's date, not today
   if (isCooldownActive(user.lastDonatedDate, slot.drive.date)) {
     throw new ConflictError("COOLDOWN_NOT_ELIGIBLE", "You will not be eligible to donate again by this drive's date.");
   }
 
-  // 3. One-active-booking-system-wide (defense layer 1 — see the partial unique
+  // 2. One-active-booking-system-wide (defense layer 1 — see the partial unique
   // index added to the migration for layer 2, data-model.md §4.5).
   const existingBooking = await prisma.booking.findFirst({ where: { userId, status: "confirmed" } });
   if (existingBooking) {
     throw new ConflictError("ALREADY_BOOKED", "You already have an active booking. Cancel it before booking another drive.");
   }
 
-  // 4. Slot capacity — locked with SELECT ... FOR UPDATE so concurrent bookings
+  // 3. Slot capacity — locked with SELECT ... FOR UPDATE so concurrent bookings
   // can't both pass the capacity check for the last remaining seat.
   const booking = await prisma.$transaction(async (tx) => {
     const [locked] = await tx.$queryRaw<{ id: string; bookedCount: number; capacity: number }[]>`
@@ -113,7 +98,6 @@ export async function createBooking(
         slotId,
         driveId,
         status: "confirmed",
-        eligibilityResult: { passed: true, answers: tokenPayload.answers },
       },
     });
   });

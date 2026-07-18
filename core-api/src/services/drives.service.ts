@@ -51,6 +51,7 @@ export interface DriveSummaryDto {
   status: DriveStatus;
   slots: SlotDto[];
   myBookingStatus: MyBookingStatus;
+  myBookedSlotId: string | null;
   isFullyBooked: boolean;
 }
 
@@ -68,13 +69,21 @@ export interface DriveDetailDto extends DriveSummaryDto {
   organizer: { id: string; fullName: string; phone: string } | null;
 }
 
+export interface BookingStatusInfo {
+  status: MyBookingStatus;
+  /** the confirmed booking's slotId — null unless status === "confirmed" */
+  slotId: string | null;
+}
+
+const NO_BOOKING: BookingStatusInfo = { status: "none", slotId: null };
+
 // One confirmed booking system-wide (data-model.md §4.5) means at most one
 // driveId maps to "confirmed"; waitlist entries can span multiple drives.
 export async function getUserBookingStatusMap(
   userId: string,
   driveIds: string[],
-): Promise<Map<string, MyBookingStatus>> {
-  const map = new Map<string, MyBookingStatus>();
+): Promise<Map<string, BookingStatusInfo>> {
+  const map = new Map<string, BookingStatusInfo>();
   if (driveIds.length === 0) return map;
 
   const [confirmedBooking, waitlistEntries] = await Promise.all([
@@ -83,10 +92,10 @@ export async function getUserBookingStatusMap(
   ]);
 
   for (const entry of waitlistEntries) {
-    map.set(entry.driveId, "waitlisted");
+    map.set(entry.driveId, { status: "waitlisted", slotId: null });
   }
   if (confirmedBooking && driveIds.includes(confirmedBooking.driveId)) {
-    map.set(confirmedBooking.driveId, "confirmed");
+    map.set(confirmedBooking.driveId, { status: "confirmed", slotId: confirmedBooking.slotId });
   }
   return map;
 }
@@ -94,7 +103,7 @@ export async function getUserBookingStatusMap(
 export function toDriveSummary(
   drive: Drive,
   slots: Slot[],
-  myBookingStatus: MyBookingStatus,
+  bookingInfo: BookingStatusInfo,
   waitlistCount: number,
 ): DriveSummaryDto {
   return {
@@ -106,7 +115,8 @@ export function toDriveSummary(
     posterUrl: drive.posterUrl,
     status: toDriveStatus(drive.date),
     slots: slots.map(toSlotDto),
-    myBookingStatus,
+    myBookingStatus: bookingInfo.status,
+    myBookedSlotId: bookingInfo.slotId,
     isFullyBooked: computeIsFullyBooked(slots, waitlistCount),
   };
 }
@@ -146,11 +156,11 @@ export async function getDriveDetail(driveId: string, userId: string): Promise<D
     getUserBookingStatusMap(userId, [driveId]),
     prisma.waitlist.count({ where: { driveId } }),
   ]);
-  const myBookingStatus = statusMap.get(driveId) ?? "none";
+  const bookingInfo = statusMap.get(driveId) ?? NO_BOOKING;
 
   // organizer info populated only if caller has a confirmed booking on this drive — api-contract.md §1.
   let organizer: DriveDetailDto["organizer"] = null;
-  if (myBookingStatus === "confirmed") {
+  if (bookingInfo.status === "confirmed") {
     organizer = {
       id: drive.organizer.id,
       fullName: drive.organizer.fullName ?? "",
@@ -159,7 +169,7 @@ export async function getDriveDetail(driveId: string, userId: string): Promise<D
   }
 
   return {
-    ...toDriveSummary(drive, slots, myBookingStatus, waitlistCount),
+    ...toDriveSummary(drive, slots, bookingInfo, waitlistCount),
     description: drive.description,
     lat: drive.lat,
     lng: drive.lng,
@@ -279,7 +289,7 @@ export async function listMyDrives(organizerId: string): Promise<{ items: DriveS
   // myBookingStatus is meaningless for the organizer's own list — always "none".
   return {
     items: drives.map((d) =>
-      toDriveSummary(d, slotsByDrive.get(d.id) ?? [], "none", waitlistCountByDrive.get(d.id) ?? 0),
+      toDriveSummary(d, slotsByDrive.get(d.id) ?? [], NO_BOOKING, waitlistCountByDrive.get(d.id) ?? 0),
     ),
   };
 }
@@ -319,7 +329,7 @@ export async function createDrive(organizerId: string, input: DriveInput): Promi
   });
 
   const slots = await prisma.slot.findMany({ where: { driveId: drive.id } });
-  return toDriveSummary(drive, slots, "none", 0); // brand new drive — waitlist can't have entries yet
+  return toDriveSummary(drive, slots, NO_BOOKING, 0); // brand new drive — waitlist can't have entries yet
 }
 
 export async function updateDrive(
@@ -382,7 +392,7 @@ export async function updateDrive(
     prisma.slot.findMany({ where: { driveId } }),
     prisma.waitlist.count({ where: { driveId } }),
   ]);
-  return toDriveSummary(drive, slots, "none", waitlistCount);
+  return toDriveSummary(drive, slots, NO_BOOKING, waitlistCount);
 }
 
 export async function deleteDrive(organizerId: string, driveId: string): Promise<{ deleted: true }> {
@@ -430,7 +440,7 @@ export async function getMyDriveDetail(organizerId: string, driveId: string): Pr
   const totalCapacity = slots.reduce((sum, s) => sum + s.capacity, 0);
 
   return {
-    ...toDriveSummary(drive, slots, "none", waitlistCount),
+    ...toDriveSummary(drive, slots, NO_BOOKING, waitlistCount),
     description: drive.description,
     lat: drive.lat,
     lng: drive.lng,

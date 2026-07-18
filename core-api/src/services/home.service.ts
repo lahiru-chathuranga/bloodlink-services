@@ -77,7 +77,7 @@ export async function getHomeFeed(userId: string): Promise<HomeFeed> {
 
   const bloodType = user.bloodType ? decryptField(user.bloodType) : null;
   const requestCityIds = [user.homeCityId, user.workCityId].filter((c): c is string => Boolean(c));
-  const urgentRequests = await getMatchingRequestsForFeed(bloodType, requestCityIds);
+  const urgentRequests = await getMatchingRequestsForFeed(userId, bloodType, requestCityIds);
 
   const homeCity = user.homeCityId ? await prisma.city.findUnique({ where: { id: user.homeCityId } }) : null;
   const workCity = user.workCityId ? await prisma.city.findUnique({ where: { id: user.workCityId } }) : null;
@@ -124,7 +124,7 @@ export async function getHomeFeed(userId: string): Promise<HomeFeed> {
       toDriveSummary(
         d,
         slotsByDrive.get(d.id) ?? [],
-        statusMap.get(d.id) ?? "none",
+        statusMap.get(d.id) ?? { status: "none", slotId: null },
         waitlistCountByDrive.get(d.id) ?? 0,
       ),
     )

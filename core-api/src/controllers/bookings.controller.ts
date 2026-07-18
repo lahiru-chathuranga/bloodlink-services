@@ -3,8 +3,8 @@ import { ok } from "../lib/response";
 import * as bookingsService from "../services/bookings.service";
 
 export async function createBooking(req: Request, res: Response): Promise<void> {
-  const { driveId, slotId, eligibilityToken } = req.body;
-  const result = await bookingsService.createBooking(req.user!.userId, driveId, slotId, eligibilityToken);
+  const { driveId, slotId } = req.body;
+  const result = await bookingsService.createBooking(req.user!.userId, driveId, slotId);
   ok(res, result, 201);
 }
 
