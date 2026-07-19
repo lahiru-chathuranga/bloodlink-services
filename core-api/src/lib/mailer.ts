@@ -14,7 +14,7 @@ const RESEND_API_URL = "https://api.resend.com/emails";
 // any recipient other than the Resend account's own email will 403, same as
 // the onboarding@resend.dev sandbox address did.
 const fromAddress = env.resendApiKey
-  ? "BloodLink <no-reply@anushakai.com>"
+  ? "BloodLink <no-reply@anushkai.com>"
   : `"${env.gmailSenderName}" <${env.gmailUser}>`;
 
 // Gmail SMTP + App Password is the decisions-log E2 explicit one-off-manual-
