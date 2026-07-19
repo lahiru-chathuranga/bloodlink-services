@@ -3,6 +3,7 @@ import { randomInt } from "crypto";
 import type { OtpPurpose } from "@prisma/client";
 import { ApiError, ConflictError } from "../lib/errors";
 import { signJwt } from "../lib/jwt";
+import { logger } from "../lib/logger";
 import { generateQrIdentifier } from "../lib/qr";
 import { sendMail } from "../lib/mailer";
 import { otpEmail } from "../lib/otp-templates";
@@ -21,20 +22,32 @@ interface AuthSession {
   user: UserProfile;
 }
 
-async function issueOtp(email: string, purpose: OtpPurpose): Promise<void> {
+// Returns whether the notification email actually sent — the OTP row above
+// is already valid and usable regardless, so a mail-provider failure (bad
+// domain config, provider outage, etc.) must not crash the whole request;
+// the caller decides what to do with a false (e.g. surface it, or — for
+// forgot-password's account-enumeration protection — deliberately ignore it).
+async function issueOtp(email: string, purpose: OtpPurpose): Promise<boolean> {
   const code = randomInt(100000, 1000000).toString();
   const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
   await prisma.otp.create({ data: { email, code, purpose, expiresAt } });
   const { subject, html } = otpEmail(purpose, code);
-  await sendMail(email, subject, html);
+
+  try {
+    await sendMail(email, subject, html);
+    return true;
+  } catch (err) {
+    logger.error({ err, email, purpose }, "Failed to send OTP email — OTP was still issued");
+    return false;
+  }
 }
 
 export async function checkEmail(email: string): Promise<EmailCheckResult> {
   const user = await prisma.user.findUnique({ where: { email } });
 
   if (!user) {
-    await issueOtp(email, "register");
-    return { status: "not_found", otpSent: true };
+    const otpSent = await issueOtp(email, "register");
+    return { status: "not_found", otpSent };
   }
 
   if (user.status === "blocked") {
@@ -42,16 +55,16 @@ export async function checkEmail(email: string): Promise<EmailCheckResult> {
   }
 
   if (user.status === "invited") {
-    await issueOtp(email, "staff_invite");
-    return { status: "invited", otpSent: true };
+    const otpSent = await issueOtp(email, "staff_invite");
+    return { status: "invited", otpSent };
   }
 
   return { status: "registered", otpSent: false };
 }
 
-export async function resendOtp(email: string, purpose: OtpPurpose): Promise<{ otpSent: true }> {
-  await issueOtp(email, purpose);
-  return { otpSent: true };
+export async function resendOtp(email: string, purpose: OtpPurpose): Promise<{ otpSent: boolean }> {
+  const otpSent = await issueOtp(email, purpose);
+  return { otpSent };
 }
 
 // Otp.used doubles as "verified" — set true here, then set-password/reset-password
@@ -165,7 +178,9 @@ export async function login(email: string, password: string): Promise<AuthSessio
 
 export async function forgotPassword(email: string): Promise<{ otpSent: true }> {
   // Same generic response regardless of whether the email exists — Requirements §4.4,
-  // avoids account enumeration.
+  // avoids account enumeration. issueOtp's real success/failure is deliberately
+  // discarded for the same reason: surfacing it would leak whether the email
+  // was valid enough to attempt a send.
   const user = await prisma.user.findUnique({ where: { email } });
   if (user) {
     await issueOtp(email, "reset_password");

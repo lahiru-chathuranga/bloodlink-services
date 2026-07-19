@@ -1,5 +1,6 @@
 import { randomInt } from "crypto";
 import { ApiError, NotFoundError } from "../lib/errors";
+import { logger } from "../lib/logger";
 import { generateQrIdentifier } from "../lib/qr";
 import { sendMail } from "../lib/mailer";
 import { otpEmail } from "../lib/otp-templates";
@@ -38,7 +39,15 @@ export async function staffInvite(
   const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
   await prisma.otp.create({ data: { email: input.email, code, purpose: "staff_invite", expiresAt } });
   const { subject, html } = otpEmail("staff_invite", code);
-  await sendMail(input.email, subject, html);
+
+  // The invited user account above is already created and usable even if the
+  // invite email fails to send — a mail-provider hiccup shouldn't fail the
+  // whole invite (the OTP row is still valid; resend-otp can retry the email).
+  try {
+    await sendMail(input.email, subject, html);
+  } catch (err) {
+    logger.error({ err, email: input.email }, "Failed to send staff invite email — user was still created");
+  }
 
   return { userId: user.id, email: user.email, status: "invited" };
 }
