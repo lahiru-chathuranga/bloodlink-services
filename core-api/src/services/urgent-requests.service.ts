@@ -1,4 +1,5 @@
 import type { User, UrgentRequest } from "@prisma/client";
+import { isCompatibleDonor } from "../lib/blood-compatibility";
 import { decryptField } from "../lib/encryption";
 import { ApiError, ForbiddenError, NotFoundError } from "../lib/errors";
 import { prisma } from "../lib/prisma";
@@ -132,7 +133,7 @@ export async function listRequestsForUser(
     for (const city of cities) {
       const nearby = await findRequestsNearPoint(city.lat, city.lng, ["open"]);
       for (const r of nearby) {
-        if (r.bloodType === bloodType) seen.set(r.id, r);
+        if (isCompatibleDonor(bloodType, r.bloodType)) seen.set(r.id, r);
       }
     }
   }
@@ -182,7 +183,7 @@ export async function getMatchingRequestsForFeed(
   for (const city of cities) {
     const nearby = await findRequestsNearPoint(city.lat, city.lng, ["open"]);
     for (const r of nearby) {
-      if (r.bloodType === bloodType) seen.set(r.id, r);
+      if (isCompatibleDonor(bloodType, r.bloodType)) seen.set(r.id, r);
     }
   }
   const sorted = [...seen.values()].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
@@ -225,6 +226,11 @@ export async function searchDonors(bloodType?: string, cityId?: string): Promise
     },
   });
 
-  const items = users.map(toDonorContact).filter((u) => !bloodType || u.bloodType === bloodType);
+  // bloodType here is the *requested* type (what staff is searching for donors
+  // to fulfill), so the filter checks whether each donor's own type can give
+  // to it — not an exact match — same as the feed/list matching above.
+  const items = users
+    .map(toDonorContact)
+    .filter((u) => !bloodType || (u.bloodType && isCompatibleDonor(u.bloodType, bloodType)));
   return { items };
 }

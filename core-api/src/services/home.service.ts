@@ -116,6 +116,24 @@ export async function getHomeFeed(userId: string): Promise<HomeFeed> {
     waitlistCountByDrive.set(entry.driveId, (waitlistCountByDrive.get(entry.driveId) ?? 0) + 1);
   }
 
+  // One confirmed booking system-wide (data-model.md §4.5) means at most one
+  // drive in this feed can be "confirmed" — resolve that single organizer's
+  // contact so the drive card's Call button has a number, same rule as the
+  // Drive Detail screen ("organizer" only shown once you're actually booked).
+  const confirmedDriveId = [...statusMap.entries()].find(([, info]) => info.status === "confirmed")?.[0];
+  const confirmedDrive = confirmedDriveId ? drives.find((d) => d.id === confirmedDriveId) : undefined;
+  let confirmedOrganizer: DriveSummaryDto["organizer"] = null;
+  if (confirmedDrive) {
+    const organizerUser = await prisma.user.findUnique({ where: { id: confirmedDrive.createdBy } });
+    if (organizerUser) {
+      confirmedOrganizer = {
+        id: organizerUser.id,
+        fullName: organizerUser.fullName ?? "",
+        phone: organizerUser.phone ? decryptField(organizerUser.phone) : "",
+      };
+    }
+  }
+
   // Requirements §5/decision #29 — nearest-first, with isFullyBooked drives
   // pushed after every bookable one regardless of distance.
   const sortedDrives = [...drives].sort((a, b) => a.distanceKm - b.distanceKm);
@@ -126,6 +144,7 @@ export async function getHomeFeed(userId: string): Promise<HomeFeed> {
         slotsByDrive.get(d.id) ?? [],
         statusMap.get(d.id) ?? { status: "none", slotId: null },
         waitlistCountByDrive.get(d.id) ?? 0,
+        d.id === confirmedDriveId ? confirmedOrganizer : null,
       ),
     )
     .sort((a, b) => Number(a.isFullyBooked) - Number(b.isFullyBooked));

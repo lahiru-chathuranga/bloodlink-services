@@ -49,11 +49,16 @@ export interface DriveSummaryDto {
   cityId: string;
   date: string;
   posterUrl: string | null;
+  lat: number;
+  lng: number;
+  mapUrl: string | null;
   status: DriveStatus;
   slots: SlotDto[];
   myBookingStatus: MyBookingStatus;
   myBookedSlotId: string | null;
   isFullyBooked: boolean;
+  /** populated only if caller has a confirmed booking on this drive */
+  organizer: { id: string; fullName: string; phone: string } | null;
 }
 
 // data-model.md §2.2.1 — every slot full AND waitlist at max. Deliberately
@@ -65,10 +70,6 @@ export function computeIsFullyBooked(slots: Slot[], waitlistCount: number): bool
 
 export interface DriveDetailDto extends DriveSummaryDto {
   description: string;
-  lat: number;
-  lng: number;
-  mapUrl: string | null;
-  organizer: { id: string; fullName: string; phone: string } | null;
 }
 
 export interface BookingStatusInfo {
@@ -107,6 +108,7 @@ export function toDriveSummary(
   slots: Slot[],
   bookingInfo: BookingStatusInfo,
   waitlistCount: number,
+  organizer: DriveSummaryDto["organizer"] = null,
 ): DriveSummaryDto {
   return {
     id: drive.id,
@@ -115,11 +117,15 @@ export function toDriveSummary(
     cityId: drive.cityId,
     date: drive.date.toISOString().slice(0, 10),
     posterUrl: drive.posterUrl,
+    lat: drive.lat,
+    lng: drive.lng,
+    mapUrl: drive.mapUrl,
     status: toDriveStatus(drive.date),
     slots: slots.map(toSlotDto),
     myBookingStatus: bookingInfo.status,
     myBookedSlotId: bookingInfo.slotId,
     isFullyBooked: computeIsFullyBooked(slots, waitlistCount),
+    organizer,
   };
 }
 
@@ -173,9 +179,6 @@ export async function getDriveDetail(driveId: string, userId: string): Promise<D
   return {
     ...toDriveSummary(drive, slots, bookingInfo, waitlistCount),
     description: drive.description,
-    lat: drive.lat,
-    lng: drive.lng,
-    mapUrl: drive.mapUrl,
     organizer,
   };
 }
@@ -452,9 +455,6 @@ export async function getMyDriveDetail(organizerId: string, driveId: string): Pr
   return {
     ...toDriveSummary(drive, slots, NO_BOOKING, waitlistCount),
     description: drive.description,
-    lat: drive.lat,
-    lng: drive.lng,
-    mapUrl: drive.mapUrl,
     organizer: null,
     waitlistCount,
     totalBooked,
