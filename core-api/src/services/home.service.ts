@@ -101,7 +101,7 @@ export async function getHomeFeed(userId: string): Promise<HomeFeed> {
 
   const driveIds = drives.map((d) => d.id);
   const [slotsAll, statusMap, waitlistEntries] = await Promise.all([
-    prisma.slot.findMany({ where: { driveId: { in: driveIds } } }),
+    prisma.slot.findMany({ where: { driveId: { in: driveIds } }, orderBy: { startTime: "asc" } }),
     getUserBookingStatusMap(userId, driveIds),
     prisma.waitlist.findMany({ where: { driveId: { in: driveIds } } }),
   ]);

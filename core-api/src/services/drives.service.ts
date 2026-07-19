@@ -67,6 +67,7 @@ export interface DriveDetailDto extends DriveSummaryDto {
   description: string;
   lat: number;
   lng: number;
+  mapUrl: string | null;
   organizer: { id: string; fullName: string; phone: string } | null;
 }
 
@@ -153,7 +154,7 @@ export async function getDriveDetail(driveId: string, userId: string): Promise<D
   if (!drive) throw new NotFoundError("Drive not found.");
 
   const [slots, statusMap, waitlistCount] = await Promise.all([
-    prisma.slot.findMany({ where: { driveId } }),
+    prisma.slot.findMany({ where: { driveId }, orderBy: { startTime: "asc" } }),
     getUserBookingStatusMap(userId, [driveId]),
     prisma.waitlist.count({ where: { driveId } }),
   ]);
@@ -174,6 +175,7 @@ export async function getDriveDetail(driveId: string, userId: string): Promise<D
     description: drive.description,
     lat: drive.lat,
     lng: drive.lng,
+    mapUrl: drive.mapUrl,
     organizer,
   };
 }
@@ -181,7 +183,7 @@ export async function getDriveDetail(driveId: string, userId: string): Promise<D
 export async function getDriveSlots(driveId: string): Promise<{ items: SlotDto[] }> {
   const drive = await prisma.drive.findFirst({ where: { id: driveId, deletedAt: null } });
   if (!drive) throw new NotFoundError("Drive not found.");
-  const slots = await prisma.slot.findMany({ where: { driveId } });
+  const slots = await prisma.slot.findMany({ where: { driveId }, orderBy: { startTime: "asc" } });
   return { items: slots.map(toSlotDto) };
 }
 
@@ -274,7 +276,7 @@ export async function listMyDrives(organizerId: string): Promise<{ items: DriveS
   });
   const driveIds = drives.map((d) => d.id);
   const [slots, waitlistEntries] = await Promise.all([
-    prisma.slot.findMany({ where: { driveId: { in: driveIds } } }),
+    prisma.slot.findMany({ where: { driveId: { in: driveIds } }, orderBy: { startTime: "asc" } }),
     prisma.waitlist.findMany({ where: { driveId: { in: driveIds } } }),
   ]);
   const slotsByDrive = new Map<string, Slot[]>();
@@ -302,6 +304,7 @@ interface DriveInput {
   cityId: string;
   date: string;
   posterUrl?: string;
+  mapUrl?: string;
   slots: { startTime: string; capacity: number }[];
 }
 
@@ -320,6 +323,7 @@ export async function createDrive(organizerId: string, input: DriveInput): Promi
         lng: city.lng,
         date: new Date(input.date),
         posterUrl: input.posterUrl,
+        mapUrl: input.mapUrl,
         createdBy: organizerId,
       },
     });
@@ -329,7 +333,7 @@ export async function createDrive(organizerId: string, input: DriveInput): Promi
     return created;
   });
 
-  const slots = await prisma.slot.findMany({ where: { driveId: drive.id } });
+  const slots = await prisma.slot.findMany({ where: { driveId: drive.id }, orderBy: { startTime: "asc" } });
   return toDriveSummary(drive, slots, NO_BOOKING, 0); // brand new drive — waitlist can't have entries yet
 }
 
@@ -359,6 +363,7 @@ export async function updateDrive(
         lng: city.lng,
         date: new Date(input.date),
         posterUrl: input.posterUrl,
+        mapUrl: input.mapUrl,
       },
     });
 
@@ -394,7 +399,7 @@ export async function updateDrive(
   }
 
   const [slots, waitlistCount] = await Promise.all([
-    prisma.slot.findMany({ where: { driveId } }),
+    prisma.slot.findMany({ where: { driveId }, orderBy: { startTime: "asc" } }),
     prisma.waitlist.count({ where: { driveId } }),
   ]);
   return toDriveSummary(drive, slots, NO_BOOKING, waitlistCount);
@@ -437,7 +442,7 @@ export interface OrganizerDriveDetailDto extends DriveDetailDto {
 export async function getMyDriveDetail(organizerId: string, driveId: string): Promise<OrganizerDriveDetailDto> {
   const drive = await getOwnedDriveOrThrow(driveId, organizerId);
   const [slots, waitlistCount] = await Promise.all([
-    prisma.slot.findMany({ where: { driveId } }),
+    prisma.slot.findMany({ where: { driveId }, orderBy: { startTime: "asc" } }),
     prisma.waitlist.count({ where: { driveId } }),
   ]);
 
@@ -449,6 +454,7 @@ export async function getMyDriveDetail(organizerId: string, driveId: string): Pr
     description: drive.description,
     lat: drive.lat,
     lng: drive.lng,
+    mapUrl: drive.mapUrl,
     organizer: null,
     waitlistCount,
     totalBooked,

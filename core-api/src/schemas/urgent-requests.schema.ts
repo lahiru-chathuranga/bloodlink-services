@@ -6,6 +6,7 @@ export const createRequestSchema = z.object({
   hospitalName: z.string().min(1),
   hospitalCityId: z.string().min(1),
   contactPhone: z.string().min(1),
+  mapUrl: z.string().url().optional(),
 });
 
 export const listRequestsQuerySchema = z.object({

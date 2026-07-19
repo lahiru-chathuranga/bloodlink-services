@@ -126,6 +126,10 @@ model Drive {
   lat         Float // denormalized from city at creation time
   lng         Float
   posterUrl   String?
+  // Organizer-pasted Google Maps share link for the exact venue — used as the
+  // "View on Map" href when present; falls back to the city-derived lat/lng
+  // search link above when absent (older drives, or organizer skipped it).
+  mapUrl      String?
   date        DateTime @db.Date
 
   createdBy String
@@ -205,6 +209,9 @@ model UrgentRequest {
   hospitalCity   City          @relation(fields: [hospitalCityId], references: [id])
   contactPhone   String // plain, intentionally public
   status         RequestStatus @default(open)
+  // Poster-pasted Google Maps share link for the hospital — "View on Map" is
+  // only shown when present; unlike Drive there's no lat/lng to fall back to.
+  mapUrl         String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

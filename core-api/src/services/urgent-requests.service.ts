@@ -29,6 +29,7 @@ export interface RequesterProfileDto {
 
 export interface UrgentRequestDetailDto extends UrgentRequestSummaryDto {
   postedBy: string;
+  mapUrl: string | null;
   requester: RequesterProfileDto;
 }
 
@@ -64,6 +65,7 @@ export function toDetail(
   return {
     ...toSummary(req, callerId),
     postedBy: req.postedBy,
+    mapUrl: req.mapUrl,
     requester: toRequesterProfile(req.poster),
   };
 }
@@ -73,6 +75,7 @@ interface CreateRequestInput {
   hospitalName: string;
   hospitalCityId: string;
   contactPhone: string;
+  mapUrl?: string;
 }
 
 export async function createRequest(
@@ -91,44 +94,19 @@ export async function createRequest(
       hospitalName: input.hospitalName,
       hospitalCityId: input.hospitalCityId,
       contactPhone: input.contactPhone,
+      mapUrl: input.mapUrl,
     },
   });
   return toSummary(created, userId);
 }
 
-// Haversine SQL against UrgentRequest joined to City for hospitalCityId's coordinates.
-// A request always matches if the caller posted it themselves — bloodType is the
-// *requested* type, independent of the poster's own blood type, so "My Requests"
-// must surface a poster's own post regardless of whether it matches their type.
-async function findActiveRequestsForUser(
-  userId: string,
-  bloodType: string,
-  lat: number,
-  lng: number,
-): Promise<UrgentRequest[]> {
-  return prisma.$queryRaw<UrgentRequest[]>`
-    SELECT ur.* FROM "UrgentRequest" ur
-    JOIN "City" c ON c.id = ur."hospitalCityId"
-    WHERE ur.status = 'open'
-      AND (
-        ur."postedBy" = ${userId}
-        OR (
-          ur."bloodType" = ${bloodType}
-          AND (6371 * acos(
-            cos(radians(${lat})) * cos(radians(c.lat)) *
-            cos(radians(c.lng) - radians(${lng})) +
-            sin(radians(${lat})) * sin(radians(c.lat))
-          )) <= ${MATCH_RADIUS_KM}
-        )
-      )
-    ORDER BY ur."createdAt" DESC
-  `;
-}
-
 // Used by GET /requests?scope=active|mine — api-contract.md §2.9.
 // scope=active: open requests matching the caller's blood type within 20km of
-// home, plus every request the caller posted themselves (any match). scope=mine
-// is the caller's own full request log, any status — not community history.
+// EITHER home or work city (same dual-city rule as the Home Feed's
+// getMatchingRequestsForFeed below — previously this only checked home city,
+// so a request that matched via work city showed on Home but not here), plus
+// every request the caller posted themselves. scope=mine is the caller's own
+// full request log, any status — not community history.
 export async function listRequestsForUser(
   userId: string,
   scope: "active" | "mine",
@@ -145,20 +123,27 @@ export async function listRequestsForUser(
   if (!user) throw new NotFoundError("User not found.");
 
   const bloodType = user.bloodType ? decryptField(user.bloodType) : null;
-  const homeCity = user.homeCityId
-    ? await prisma.city.findUnique({ where: { id: user.homeCityId } })
-    : null;
+  const cityIds = [user.homeCityId, user.workCityId].filter((c): c is string => Boolean(c));
 
-  // Without a bloodType/homeCity we can't compute the proximity match, but the
-  // caller's own posted requests should still show up under "My Requests".
-  const items =
-    bloodType && homeCity
-      ? await findActiveRequestsForUser(userId, bloodType, homeCity.lat, homeCity.lng)
-      : await prisma.urgentRequest.findMany({
-          where: { status: "open", postedBy: userId },
-          orderBy: { createdAt: "desc" },
-        });
+  const seen = new Map<string, UrgentRequest>();
 
+  if (bloodType && cityIds.length > 0) {
+    const cities = await prisma.city.findMany({ where: { id: { in: cityIds } } });
+    for (const city of cities) {
+      const nearby = await findRequestsNearPoint(city.lat, city.lng, ["open"]);
+      for (const r of nearby) {
+        if (r.bloodType === bloodType) seen.set(r.id, r);
+      }
+    }
+  }
+
+  // bloodType is the *requested* type, independent of the poster's own blood
+  // type, so "My Requests" must surface a poster's own post regardless of
+  // whether it matches their type or falls outside both city radii.
+  const mine = await prisma.urgentRequest.findMany({ where: { postedBy: userId, status: "open" } });
+  for (const r of mine) seen.set(r.id, r);
+
+  const items = [...seen.values()].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   return { items: items.map((r) => toSummary(r, userId)) };
 }
 
