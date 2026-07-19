@@ -9,13 +9,12 @@ import { logger } from "./logger";
 // that block entirely — it's an ordinary API call, not raw SMTP.
 const RESEND_API_URL = "https://api.resend.com/emails";
 
-// Resend's shared sandbox sender — works with zero setup, but Resend will
-// only actually deliver to the email address the Resend account itself is
-// registered under. No custom domain is verified for this project, so a real
-// "from your own domain, to anyone" sender isn't available yet — swap this
-// for a verified-domain address once one exists.
+// anushakai.com — verify it in Resend (add the SPF/DKIM/DMARC records they
+// give you at the domain's DNS host) before this works; until then sends to
+// any recipient other than the Resend account's own email will 403, same as
+// the onboarding@resend.dev sandbox address did.
 const fromAddress = env.resendApiKey
-  ? "BloodLink <onboarding@resend.dev>"
+  ? "BloodLink <no-reply@anushakai.com>"
   : `"${env.gmailSenderName}" <${env.gmailUser}>`;
 
 // Gmail SMTP + App Password is the decisions-log E2 explicit one-off-manual-
